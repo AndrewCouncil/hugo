@@ -53,9 +53,7 @@ func init() {
 }
 
 func New(cfg Config) Highlighter {
-	return chromaHighlighter{
-		cfg: cfg,
-	}
+	return NewWithTreeSitter(cfg)
 }
 
 type Highlighter interface {
