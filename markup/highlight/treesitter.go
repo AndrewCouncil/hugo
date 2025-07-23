@@ -1,3 +1,6 @@
+//go:build cgo
+// +build cgo
+
 // Copyright 2024 The Hugo Authors. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -282,12 +285,19 @@ func (h *treeSitterHighlighter) renderTreeSitterNode(node *sitter.Node, source [
 		return
 	}
 
-	// Get the content for this node
-	content := node.Content(source)
+	nodeType := node.Type()
+
+	// Handle anonymous nodes (like punctuation) differently
+	if nodeType == "" {
+		// Anonymous node - just render content without styling
+		content := node.Content(source)
+		w.WriteString(html.EscapeString(content))
+		return
+	}
 
 	// If this is a leaf node, render it with appropriate styling
 	if node.ChildCount() == 0 {
-		nodeType := node.Type()
+		content := node.Content(source)
 		class := h.mapNodeTypeToClass(nodeType)
 
 		if class != "" {
@@ -300,12 +310,37 @@ func (h *treeSitterHighlighter) renderTreeSitterNode(node *sitter.Node, source [
 		return
 	}
 
-	// For non-leaf nodes, recursively render children
+	// For non-leaf nodes, handle special cases
+	switch nodeType {
+	case "string_literal", "string", "interpreted_string_literal", "raw_string_literal":
+		// For string nodes, render the entire content as a string
+		content := node.Content(source)
+		w.WriteString(fmt.Sprintf(`<span class="s">%s</span>`, html.EscapeString(content)))
+		return
+	case "comment", "line_comment", "block_comment":
+		// For comment nodes, render the entire content as a comment
+		content := node.Content(source)
+		w.WriteString(fmt.Sprintf(`<span class="c">%s</span>`, html.EscapeString(content)))
+		return
+	}
+
+	// For other non-leaf nodes, check if we should style the whole node
+	class := h.mapNodeTypeToClass(nodeType)
+	if class != "" {
+		w.WriteString(fmt.Sprintf(`<span class="%s">`, class))
+	}
+
+	// Recursively render children
 	for i := uint32(0); i < node.ChildCount(); i++ {
 		child := node.Child(int(i))
 		if child != nil {
 			h.renderTreeSitterNode(child, source, w, cfg, lang)
 		}
+	}
+
+	// Close the span if we opened one
+	if class != "" {
+		w.WriteString("</span>")
 	}
 }
 
@@ -337,7 +372,7 @@ func (h *treeSitterHighlighter) mapNodeTypeToClass(nodeType string) string {
 		"else":      "k",
 		"for":       "k",
 		"while":     "k",
-		"function":  "k",
+		"function":  "nf",
 		"return":    "k",
 		"import":    "kn",
 		"from":      "kn",
@@ -352,12 +387,14 @@ func (h *treeSitterHighlighter) mapNodeTypeToClass(nodeType string) string {
 		"undefined": "kc",
 
 		// Identifiers
-		"identifier":    "n",
-		"variable":      "n",
-		"property":      "n",
-		"field":         "n",
-		"method":        "nf",
-		"function_name": "nf",
+		"identifier":           "n",
+		"variable":             "n",
+		"property":             "n",
+		"field":                "n",
+		"method":               "nf",
+		"function_name":        "nf",
+		"function_declaration": "nf",
+		"function_definition":  "nf",
 
 		// Types
 		"type":            "kt",
@@ -416,7 +453,7 @@ func (h *treeSitterHighlighter) mapNodeTypeToClass(nodeType string) string {
 	if strings.Contains(nodeType, "type") {
 		return "kt"
 	}
-	if strings.Contains(nodeType, "function") {
+	if strings.Contains(nodeType, "function") && !strings.Contains(nodeType, "call") {
 		return "nf"
 	}
 
